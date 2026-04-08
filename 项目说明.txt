@@ -1,0 +1,442 @@
+📖 晋宁会馆·秃贝五边形 4.1 — 项目运维手册
+一、项目总览
+1.1 项目定位
+秃贝五边形是为《罗小黑战记》粉丝社群"晋宁会馆"量身打造的QQ机器人系统。它不是一个通用机器人框架，而是一套深度定制的社群数字化生态，融合了AI对话、RPG修行、社群管理三大核心功能。
+
+1.2 技术架构
+text
+
+┌─────────────────────────────────┐
+│         QQ 客户端 (用户)         │
+└──────────┬──────────────────────┘
+           │ NTQQ 协议
+┌──────────▼──────────────────────┐
+│    NapCatQQ (Docker 容器)        │
+│    模拟真实客户端行为             │
+└──────────┬──────────────────────┘
+           │ OneBot V11 WebSocket
+┌──────────▼──────────────────────┐
+│    NoneBot2 (Python 框架)        │
+│    ├── tubei_system  系统底座     │
+│    ├── tubei_admin   行政管理     │
+│    ├── tubei_cultivation 修行    │
+│    ├── tubei_entertainment 娱乐  │
+│    ├── tubei_guide   引导菜单    │
+│    └── tubei_chat    AI 对话     │
+└──────────┬──────────────────────┘
+           │ HTTP API
+┌──────────▼──────────────────────┐
+│  DeepSeek-V3 via SiliconFlow    │
+│  (AI 大脑)                       │
+└─────────────────────────────────┘
+1.3 数据存储
+text
+
+data/
+├── members_db.json    成员档案（QQ号→个人信息）
+├── spirit_db.json     灵力数据（QQ号→修行数值）
+├── bot_status.json    全局状态（祭坛、人格、世界事件）
+├── backups/           自动备份（.bak 文件）
+└── logs/              按日切割的 JSONL 日志
+数据安全机制：
+
+启动时一次性加载到内存，运行时零磁盘IO
+每30秒检查脏标记，有变更才写盘
+原子写入：先写 .tmp，再 rename 覆盖
+每次写盘前自动备份 .bak
+关机时强制落盘
+二、群分级体系
+等级	代号	说明	可用功能
+Tier 0	core	核心群（会馆主群、管理群、调试群）	全部功能
+Tier 1	allied	联盟群（友好社群）	大部分功能，无馆内专属
+Tier 2	public	公开群（任何其他群）	厨房、鉴定、真心话、AI聊天
+Tier 3	danger	危险群（特殊限制群）	仅今日老婆+退出彩蛋
+配置位置：config/groups.yaml
+
+YAML
+
+core_groups:
+  564234162:
+    name: "晋宁会馆主群"
+    type: "main"        # main=主群 admin=管理群 debug=调试群
+  210383914:
+    name: "管理组官群"
+    type: "admin"
+
+allied_groups:
+  1092658209:
+    name: "妖灵会馆-顺湖会馆"
+
+danger_groups:
+  627896850:
+    name: "某群"
+添加新群：在对应等级下添加条目，然后执行 /重载配置 即可热生效。
+
+三、功能模块详解
+3.1 行政模块 (tubei_admin)
+功能	指令	权限	说明
+登记引导	登记	allied+	发送登记模板
+提交登记	/在馆人员登记	allied+	提交填写好的表单
+查看档案	档案	allied+已登记	查看个人修行面板
+查看名单	查看名单	管理组	查看所有在册成员
+修改数值	/修改 QQ 灵力 100	管理组	修改指定成员属性
+发放物品	/发放 QQ 神秘种子 3	管理组	给成员发放道具
+除名	/删除名单 QQ	管理组	软删除成员
+3.2 修行模块 (tubei_cultivation)
+功能	指令	冷却/限制	收益公式
+聚灵修行	聚灵	每日1次，60秒CD	(基础10-30 + 等级加成 + 永久加成) × (1 + 运势 + buff)
+每日灵签	求签	每日1次	影响聚灵收益倍率
+妖灵派遣	派遣 [地点]	派遣期间不能聚灵	按区域配置的sp范围随机
+强制召回	召回	-	消耗5灵力
+查看药圃	药圃	-	-
+播种	播种	需要神秘种子	-
+灌溉	灌溉	每日1次	每棵+1水(露水凝珠+2)
+收获	收获	需成熟植物	获得灵植道具
+背包	背包	-	-
+使用道具	使用 [道具名]	-	按道具类型不同效果
+法宝熔炼	熔炼	需法宝碎片x10	45%普通/35%稀有/15%传说/5%彩蛋
+道具图鉴	图鉴 [道具名]	-	查看碎碎念描述
+祭坛	祭坛	馆内专属	每次聚灵上缴1%灵力
+成就	我的成就	-	-
+称号	我的称号	-	佩戴解锁的称号
+排行榜	排行榜 [类型]	-	灵力/嘿咻/聚灵/厨房/派遣
+世界事件	世界事件	-	查看当前活跃事件
+3.3 娱乐模块 (tubei_entertainment)
+功能	指令	说明
+厨房挑战	厨房挑战	30%美味(+50sp) / 70%黑暗(-10sp+味蕾丧失)
+灵质鉴定	鉴定	消耗2灵力，随机词条+buff
+灵力切磋	切磋 @某人	灵力±20%波动比大小
+嘿咻捕获	捕捉	出现时先到先得，80%成功率
+今日灵伴	今日灵伴	基于日期种子的双向配对
+今日老婆	今日老婆	致敬萝卜，所有群可用
+真心话	/真心话	随机题目
+大冒险	/大冒险	随机任务
+3.4 AI对话模块 (tubei_chat)
+触发方式：
+
+@秃贝 + 任意内容
+"秃贝秃贝" + 任意内容
+核心群/联盟群内3%概率随机插嘴（消息>4字时）
+五重人格模式：
+
+代号	风格	切换指令
+normal	温和治愈呆萌	/切换人格 normal
+middle_school	中二狂妄	/切换人格 middle_school
+cold	高冷毒舌	/切换人格 cold
+secretary	严谨专业	/切换人格 secretary
+overload	话痨神经质	/切换人格 overload
+RAG知识加载规则：
+
+核心群：加载完整世界观+成员档案+名词映射
+联盟群：加载基础知识，不泄露成员隐私
+公开群：最基础知识，伪装人类身份
+3.5 系统模块 (tubei_system)
+消息拦截器：每条消息经过，检查封禁→频率→身份感知
+
+防刷屏：1分钟内超10条→警告，超12条→封禁10分钟
+
+馆禁时间（凌晨1-5点，仅核心群）：
+
+禁止：嘿咻刷新、世界事件通报、AI随机插嘴
+允许：用户主动触发的所有指令、@秃贝对话
+劝睡：5%概率回复劝睡文案，同一用户30分钟冷却
+世界事件（每日10:00抽签）：
+
+事件	概率	效果	持续
+灵潮爆发	60%	聚灵+30%	2小时
+嘿咻暴动	15%	每30分刷一只	2小时
+无限失控	20%	厨房全美味	1小时
+四、道具体系总览
+4.1 灵植（药圃产出）
+道具	效果	获取
+灵心草	下次聚灵×1.5	药圃种植
+蓝玉果	下次聚灵基础值锁最大	药圃种植
+鸾草	下次鉴定必出稀有	药圃种植
+凤羽花	下次派遣必掉法宝碎片	药圃种植
+忘忧草	消除味蕾丧失	药圃种植
+聚灵花	立即+15灵力	药圃种植
+4.2 丹药/法宝（熔炼/派遣产出）
+道具	效果	来源
+涪灵丹	抵消厨房失败惩罚	熔炼普通
+玄清丹	重置今日聚灵次数	熔炼稀有/派遣
+清心露	厨房成功率+20%	熔炼普通/派遣
+空间简片	派遣耗时减半	熔炼稀有/派遣
+引灵香	群内召唤嘿咻	熔炼传说
+万宝如意	熔炼至少稀有	熔炼稀有
+护身符	派遣灵力+20%	派遣
+五行灵核	药圃一株瞬熟	派遣
+4.3 秘宝（永久效果）
+道具	效果	来源
+完整天明珠	永久聚灵+5	熔炼传说/龙脉节点
+上古秘卷	永久派遣+3	熔炼传说/妖王遗迹
+破碎星核	永久聚灵+3	熔炉彩蛋
+4.4 决策组信物（极低概率派遣掉落）
+道具	效果	掉率
+析沐的钥匙	永久解锁一个高阶灵域	0.5%-3%
+吉熙的信羽	24h吉兆buff（四系统各一次最佳）	0.5%-3%
+焚的残火	当前灵力×25%	0.5%-3%
+五、等级与成就系统
+5.1 等级体系
+等级	境界名	所需灵力
+Lv.1	灵识觉醒	0
+Lv.2	聚灵化息	100
+Lv.3	引灵归宗	800
+Lv.4	固灵成相	2000
+Lv.5	御灵镇域	5000
+Lv.6	化灵通神	15000
+Lv.7	万灵归一	40000
+5.2 成就定义
+成就定义在 config/game_balance.yaml 的 achievements 部分。
+
+两种检查方式：
+
+stat_gte：自动检查统计字段（如聚灵100次）
+manual：由各模块主动调用 achievement_engine.try_unlock()
+添加新成就：在 game_balance.yaml 的 achievements 下添加：
+
+YAML
+
+新成就名:
+  desc: "描述文本"
+  rarity: "common"    # common/rare/epic/legendary
+  title: "称号名"     # null 表示不给称号
+  check_type: "stat_gte"  # 或 "manual"
+  check_field: "统计字段名"
+  check_value: 目标值
+六、派遣灵域体系
+区域	等级	耗时	灵力范围	特色掉落
+晋宁老街	Lv.2	1h	5-15	神秘种子、法宝碎片
+灵溪浅滩	Lv.2	1h	8-12	灵心草、露水凝珠
+废弃地铁站	Lv.2	1h	5-10	法宝碎片、嘿咻毛球
+云隐茶楼	Lv.4	4h	15-30	涪灵丹、鸾草、清心露
+古寺后山	Lv.4	4h	20-35	玄清丹、护身符
+迷雾森林	Lv.4	4h	18-28	蓝玉果、凤羽花、忘忧草
+镜中世界	Lv.6	8h	40-65	空间简片、虚空结晶
+龙脉节点	Lv.6	8h	45-70	完整天明珠、五行灵核
+妖王遗迹	Lv.6	8h	50-80	凤羽花、上古秘卷
+所有区域均有极低概率掉落三大决策组信物。
+
+七、日常维护指南
+7.1 服务管理
+Bash
+
+# 启动秃贝
+sudo systemctl start jinningbot
+
+# 停止秃贝
+sudo systemctl stop jinningbot
+
+# 重启秃贝
+sudo systemctl restart jinningbot
+
+# 查看实时日志
+journalctl -u jinningbot -f
+
+# 查看 NapCat 状态
+docker ps | grep napcat
+
+# 重启 NapCat
+docker restart napcat
+7.2 数据备份
+Bash
+
+# 手动备份（建议每周一次）
+cp data/members_db.json data/backups/members_$(date +%Y%m%d).json
+cp data/spirit_db.json data/backups/spirit_$(date +%Y%m%d).json
+cp data/bot_status.json data/backups/status_$(date +%Y%m%d).json
+
+# 自动备份已由系统在每次写盘时生成 .bak 文件
+7.3 日志管理
+Bash
+
+# 日志位置
+ls data/logs/
+
+# 查看某天的事件统计
+cat data/logs/2026-03-26.jsonl | python3 -c "
+import sys, json
+from collections import Counter
+c = Counter()
+for line in sys.stdin:
+    c[json.loads(line)['type']] += 1
+for k,v in c.most_common(): print(f'{k}: {v}')
+"
+
+# 日志自动清理：30天前的日志会在每天 00:10 自动删除
+7.4 在线管理指令
+指令	说明	场景
+/系统状态	查看全局运行数据	每日巡检
+/强制保存	立即落盘	紧急维护前
+/重载配置	热重载yaml配置	改参数后
+/全员广播 [内容]	群发公告	活动通知
+/封印 QQ 分钟	封禁用户	处理违规
+/全员福利 sp 100	全员发灵力	节日活动
+/切换人格 [模式]	切换AI性格	活跃气氛
+/宣传开关	开关宣传功能	推广引流
+八、参数调整指南
+8.1 修改数值参数
+文件：config/game_balance.yaml
+
+生效方式：修改后在群内发送 /重载配置，无需重启
+
+常用调参场景：
+
+YAML
+
+# 觉得聚灵收益太低/太高
+meditation:
+  base_min: 10      # 基础最小值
+  base_max: 30      # 基础最大值
+  daily_limit: 1    # 每日次数限制
+
+# 觉得厨房太难/太简单
+kitchen:
+  success_rate: 0.30    # 成功率(0.0-1.0)
+  reward_sp: 50         # 成功奖励
+  penalty_sp: 10        # 失败惩罚
+  daily_limit: 4        # 每日限制
+
+# 觉得嘿咻太频繁/太稀少
+heixiu:
+  spawn_interval_hours: 30   # 间隔小时数
+  spawn_jitter: 21600        # 波动范围(秒)
+  catch_success_rate: 0.80   # 捕捉成功率
+
+# 调整等级门槛
+levels:
+  thresholds:
+    2: 100    # Lv.2 需要 100 灵力
+    3: 800    # 以此类推
+8.2 修改文案
+文件：config/responses.yaml
+
+生效方式：/重载配置
+
+YAML
+
+# 添加新的聚灵场景文案
+cultivation:
+  meditate_scene:
+    - "新文案内容..."
+
+# 添加新的厨房菜单
+kitchen:
+  menu_good:
+    - "新菜名"
+  menu_bad:
+    - "新黑暗料理名"
+8.3 修改群配置
+文件：config/groups.yaml
+
+生效方式：/重载配置
+
+YAML
+
+# 添加新的核心群
+core_groups:
+  新群号:
+    name: "群名"
+    type: "main"    # main/admin/debug
+
+# 添加新的联盟群
+allied_groups:
+  新群号:
+    name: "群名"
+8.4 添加新道具
+步骤：
+
+在 src/plugins/tubei_cultivation/items.py 的 ARTIFACTS 字典中添加道具定义
+在 game_balance.yaml 的派遣掉落表或熔炼池中添加
+重启服务
+8.5 添加新派遣区域
+在 game_balance.yaml 的 expedition.locations 下添加：
+
+YAML
+
+新区域名:
+  level: 4           # 所需等级
+  time: 14400         # 耗时(秒)
+  sp_min: 15          # 最低灵力
+  sp_max: 30          # 最高灵力
+  desc: "区域描述"
+  drops:
+    道具名: 0.20      # 掉落概率
+九、升级规划
+9.1 近期可做 (v4.2)
+晋宁会馆官网：利用 export_for_web() 接口导出数据，搭建静态展示页
+OC档案系统：members_db 中已预留 oc_details 字段，可扩展为结构化OC展示
+组队系统：多人协作派遣，共享收益
+天气系统：影响聚灵/药圃的每日全局天气
+9.2 中期规划 (v5.0)
+迁移至 SQLite/PostgreSQL：当成员超过100人时，JSON性能将成为瓶颈
+Web管理后台：可视化管理成员、查看统计、调整参数
+图片渲染：将纯文本卡片升级为HTML渲染图片（nonebot-plugin-htmlrender）
+自定义事件系统：管理员可通过指令创建限时活动
+9.3 长期愿景
+多会馆支持：一套代码服务多个独立社群
+AI记忆系统：基于向量数据库的长期记忆
+语音交互：接入TTS，秃贝可以发语音
+十、故障排查速查表
+现象	可能原因	解决方案
+秃贝完全无反应	NapCat 断连	docker restart napcat
+指令有反应但AI不回	API Key失效/余额不足	检查 .env.prod 中的 SILICONFLOW_API_KEY
+数据丢失	异常关机未落盘	从 .bak 文件恢复
+嘿咻不刷新	馆禁时间/已有活跃嘿咻	检查时间/重启清除状态
+某指令报错	代码bug	查看 journalctl -u jinningbot -f
+群里疯狂刷消息	有人刷屏	自动封禁10分钟，或 /封印 QQ 60
+配置改了没生效	未重载	/重载配置 或重启服务
+十一、关键文件索引
+text
+
+bot.py                          程序入口
+.env.prod                       环境变量（API Key等）
+config/
+├── game_balance.yaml           所有数值参数（改这个最多）
+├── responses.yaml              所有文案
+├── groups.yaml                 群分级配置
+├── questions.json              真心话大冒险题库
+└── commands_registry.yaml      指令注册表（声明式文档）
+src/common/
+├── command_registry.py         指令注册中心（实际运行用这个）
+├── data_manager.py             数据管理器（系统心脏）
+├── group_manager.py            群分级管理器
+├── permission.py               权限检查系统
+├── identity.py                 身份感知系统
+├── response_manager.py         文案管理器
+├── ui_renderer.py              卡片式UI渲染器
+└── utils.py                    公共工具函数
+src/plugins/
+├── tubei_system/               系统底座
+│   ├── config.py               配置中心
+│   ├── interceptor.py          消息拦截器+劝睡
+│   ├── mutex.py                互斥锁
+│   ├── recorder.py             事件记录器
+│   ├── reporter.py             每日报告
+│   ├── console.py              管理控制台
+│   ├── world_event.py          世界事件
+│   └── text_dispatcher.py      纯文字指令分发器
+├── tubei_admin/                行政管理
+│   ├── registry.py             登记系统
+│   └── manager.py              名单管理
+├── tubei_cultivation/          修行系统
+│   ├── meditation.py           聚灵+灵签+档案
+│   ├── expedition.py           派遣系统
+│   ├── garden.py               药圃系统
+│   ├── altar.py                祭坛系统
+│   ├── items.py                道具+熔炼+图鉴
+│   ├── achievement.py          成就+称号
+│   └── ranking.py              排行榜
+├── tubei_entertainment/        娱乐系统
+│   ├── kitchen.py              厨房挑战
+│   ├── resonance.py            灵伴+鉴定+今日老婆
+│   ├── duel.py                 切磋
+│   ├── heixiu_catcher.py       嘿咻捕获
+│   └── truth_dare.py           真心话大冒险
+├── tubei_guide/                引导系统
+│   └── __init__.py             菜单+说明+关于
+└── tubei_chat/                 AI对话
+    ├── persona.py              人格模板
+    ├── rag_engine.py           RAG知识引擎
+    └── __init__.py             对话主逻辑
+    
+秃贝五边形 v4.1 · 晋宁会馆出品 · 析沐大人监制
